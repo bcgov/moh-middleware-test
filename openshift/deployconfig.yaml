@@ -1,0 +1,169 @@
+apiVersion: v1
+kind: Template
+labels:
+  template: moh-middleware-test
+metadata:
+  name: moh-middleware-test
+objects:
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      creationTimestamp: null,
+      name: "${NAME}"
+      labels:
+        app: "${NAME}"
+    spec:
+      ports:
+        - name: 8080-tcp
+          port: 8080
+          protocol: TCP
+          targetPort: 8080
+      selector:
+        app: "${NAME}"
+        deploymentconfig: "${NAME}"
+      sessionAffinity: None,
+      type: ClusterIP
+  - apiVersion: v1
+    kind: Route
+    metadata:
+      labels:
+        app: "${NAME}"
+      name: "${NAME}"
+    spec:
+      host: "${APPLICATION_DOMAIN}"
+      port:
+        targetPort: 8080-tcp
+      to:
+        kind: Service
+        name: "${NAME}"
+        weight: 100
+      tls:
+        insecureEdgeTerminationPolicy: Redirect
+        termination: edge
+  - apiVersion: v1
+    kind: DeploymentConfig
+    metadata:
+      annotations:
+      labels:
+        app: "${NAME}"
+      name: "${NAME}"
+    spec:
+      replicas: 1
+      selector:
+        app: "${NAME}"
+        deploymentconfig: "${NAME}"
+      strategy:
+        activeDeadlineSeconds: 21600
+        resources: {}
+        rollingParams:
+          intervalSeconds: 1
+          maxSurge: 25%
+          maxUnavailable: 25%
+          timeoutSeconds: 600
+          updatePeriodSeconds: 1
+        type: Rolling
+      template:
+        metadata:
+          labels:
+            app: "${NAME}"
+            deploymentconfig: "${NAME}"
+        spec:
+          containers:
+            - env:
+                - name: DB_DRIVER
+                  value: ${DB_DRIVER}
+                - name: JDBC_URL
+                  value: 'jdbc:postgresql://${DATABASE_SERVICE_NAME}:5432/${DATABASE_NAME}'
+                - name: JDBC_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: "${DATABASE_DEPLOYMENT_NAME}"
+                      key: "${DATABASE_USER_KEY_NAME}"
+                - name: JDBC_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: "${DATABASE_DEPLOYMENT_NAME}"
+                      key: "${DATABASE_PASSWORD_KEY_NAME}"
+                - name: WAIT_FOR
+                  value: ${DATABASE_DEPLOYMENT_NAME}:${DATABASE_PORT}
+                - name: DEBUG
+                  value: 'False'
+              image: " "
+              imagePullPolicy: Always
+              name: "${NAME}"
+              ports:
+                - containerPort: 8080
+                  protocol: TCP
+              resources:
+                limits:
+                  cpu: 500m
+                  memory: 2Gi
+                requests:
+                  cpu: 200m
+                  memory: 512Mi
+              terminationMessagePath: /dev/termination-log
+              terminationMessagePolicy: File
+          dnsPolicy: ClusterFirst
+          restartPolicy: Always
+          schedulerName: default-scheduler
+          securityContext: {}
+          terminationGracePeriodSeconds: 30
+          affinity:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                - labelSelector:
+                    matchExpressions:
+                      - key: name
+                        operator: In
+                        values:
+                          - "${NAME}"
+                  topologyKey: kubernetes.io/hostname
+      triggers:
+        - imageChangeParams:
+            automatic: true
+            containerNames:
+              - "${NAME}"
+            from:
+              kind: ImageStreamTag
+              name: "${NAME}:${IMAGE_TAG}"
+              namespace: ${TOOLS_WORKSPACE}
+          type: ImageChange
+        - type: ConfigChange
+parameters:
+  - name: NAME
+    displayName: Name
+    description: The suffix for all created objects
+    required: false
+    value: moh-middleware-test
+  - name: APPLICATION_DOMAIN
+    description: "The exposed hostname that will route to the Vue application"
+  - name: IMAGE_TAG
+    description: The image tag to pull for the deployment.
+    required: true
+    value: dev
+  - name: TOOLS_WORKSPACE
+    description: The Location for your image streams (Tools Workspace)
+    required: true
+  - name: DB_DRIVER
+    value: org.postgresql.Driver
+  - name: DATABASE_SERVICE_NAME
+    value: postgresql
+  - name: DATABASE_NAME
+    value: moh-middleware-test-db
+  - name: DATABASE_PORT
+    value: "5432"
+  - name: DATABASE_DEPLOYMENT_NAME
+    displayName: Database Deployment Name
+    description: The name associated to the database deployment resources.  In particular, this is used to wire up the credentials associated to the database.
+    required: true
+    value: postgresql
+  - name: DATABASE_USER_KEY_NAME
+    displayName: Database User Key Name
+    description: The datbase user key name stoed in database deployment resources specified by DATABASE_DEPLOYMENT_NAME.
+    required: true
+    value: database-user
+  - name: DATABASE_PASSWORD_KEY_NAME
+    displayName: Database Password Key Name
+    description: The datbase password key name stoed in database deployment resources specified by DATABASE_DEPLOYMENT_NAME.
+    required: true
+    value: database-password
